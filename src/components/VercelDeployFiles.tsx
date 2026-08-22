@@ -79,8 +79,12 @@ export default async function handler(req, res) {
   "version": 2,
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/api/bot",
       "destination": "/api/bot"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }`,
