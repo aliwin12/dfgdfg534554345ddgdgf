@@ -117,10 +117,18 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
     const text = msg.text || msg.caption || '';
     const msgType = detectMessageType(msg);
 
-    // Skip if message is directly in private chat with ourself
-    if (chat && myChatId && chat.id.toString() === myChatId.toString()) {
-      addLog('info', `Игнорировано сообщение из личного диалога (Chat ID ${chat.id})`);
-      return;
+    // If message is in private chat with ourself, process and acknowledge it!
+    const isPrivateSelfChat = chat && myChatId && chat.id.toString() === myChatId.toString();
+    if (isPrivateSelfChat) {
+      addLog('info', `Получено личное тестовое сообщение от вас (Chat ID ${chat.id}): "${text || msgType}"`);
+      // Reply back with confirmation so the user sees the bot is alive
+      if (text && !text.startsWith('/')) {
+        try {
+          await ctx.reply(`✅ <b>Бот вас слышит!</b>\n\nВы написали: <i>${escapeHtml(text)}</i>\n\nБот готов к работе. Теперь добавьте бота в группы/каналы, откуда нужно пересылать сообщения.`, { parse_mode: 'HTML' });
+        } catch (e: any) {
+          console.error('Error replying in self chat:', e);
+        }
+      }
     }
 
     const title = chat?.title || `${chat?.first_name || ''} ${chat?.last_name || ''}`.trim() || 'Группа';
@@ -288,7 +296,25 @@ function initBotInstance(token: string) {
 
 // Initialize on startup if token exists
 if (botToken) {
-  initBotInstance(botToken);
+  const bot = initBotInstance(botToken);
+  if (bot && myChatId) {
+    (async () => {
+      try {
+        await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+        bot.launch({
+          allowedUpdates: ['message', 'channel_post', 'edited_message'],
+        }).catch((e: any) => {
+          addLog('error', `Ошибка в процессе polling: ${e.message}`);
+          isPollingRunning = false;
+        });
+        isPollingRunning = true;
+        botMode = 'polling';
+        addLog('success', '🚀 Бот автоматически запущен на старте сервера в режиме Long Polling!');
+      } catch (err: any) {
+        addLog('warn', `Автозапуск Polling: ${err.message}`);
+      }
+    })();
+  }
 }
 
 // API Routes
