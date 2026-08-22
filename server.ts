@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { Telegraf } from 'telegraf';
 import dotenv from 'dotenv';
@@ -13,17 +14,57 @@ const PORT = 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// In-memory application state
+// Config file path for persistent settings
+const CONFIG_FILE = path.join(process.cwd(), 'bot_config.json');
+
+// Default / Initial Settings
 let botToken: string = process.env.BOT_TOKEN || '8988916261:AAF1b0yLepEVgdUPSike9NsENbWuTlHc4wc';
 let myChatId: string = process.env.MY_CHAT_ID || '';
-let botMode: 'webhook' | 'polling' | 'idle' = botToken ? 'webhook' : 'idle';
+let botMode: 'webhook' | 'polling' | 'idle' = botToken ? 'polling' : 'idle';
 let currentBot: Telegraf | null = null;
 let isPollingRunning = false;
-
-// Keywords and filter settings
 let watchedKeywords: string[] = ['срочно', 'важно', 'цена', 'заказ', 'купить', 'помощь', 'клиент'];
 let forwardAllMessages = true;
 let notifyOnKeyword = true;
+
+// Load persisted configuration from disk if exists
+try {
+  if (fs.existsSync(CONFIG_FILE)) {
+    const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+    const saved = JSON.parse(raw);
+    if (saved.botToken) botToken = saved.botToken;
+    if (saved.myChatId) myChatId = saved.myChatId;
+    if (Array.isArray(saved.watchedKeywords)) watchedKeywords = saved.watchedKeywords;
+    if (typeof saved.forwardAllMessages === 'boolean') forwardAllMessages = saved.forwardAllMessages;
+    if (typeof saved.notifyOnKeyword === 'boolean') notifyOnKeyword = saved.notifyOnKeyword;
+    console.log('[CONFIG] Successfully loaded saved settings from bot_config.json');
+  }
+} catch (e: any) {
+  console.error('[CONFIG] Failed to read bot_config.json:', e.message);
+}
+
+function saveConfigToDisk() {
+  try {
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(
+        {
+          botToken,
+          myChatId,
+          watchedKeywords,
+          forwardAllMessages,
+          notifyOnKeyword,
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+    console.log('[CONFIG] Settings successfully saved to bot_config.json');
+  } catch (e: any) {
+    console.error('[CONFIG] Failed to save bot_config.json:', e.message);
+  }
+}
 
 interface StoredMessage {
   id: string;
@@ -124,14 +165,14 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
       // Reply back with confirmation so the user sees the bot is alive
       if (text && !text.startsWith('/')) {
         try {
-          await ctx.reply(`✅ <b>Бот вас слышит!</b>\n\nВы написали: <i>${escapeHtml(text)}</i>\n\nБот готов к работе. Теперь добавьте бота в группы/каналы, откуда нужно пересылать сообщения.`, { parse_mode: 'HTML' });
+          await ctx.reply(`✅ <b>Бот вас слышит!</b>\n\nВы написали: <i>${escapeHtml(text)}</i>\n\nБот активен и готов к работе.`, { parse_mode: 'HTML' });
         } catch (e: any) {
           console.error('Error replying in self chat:', e);
         }
       }
     }
 
-    const title = chat?.title || `${chat?.first_name || ''} ${chat?.last_name || ''}`.trim() || 'Группа';
+    const title = chat?.title || `${chat?.first_name || ''} ${chat?.last_name || ''}`.trim() || 'Чат';
     const senderName = from.username
       ? `@${from.username}`
       : `${from.first_name || ''} ${from.last_name || ''}`.trim() || `User ${from.id}`;
@@ -153,7 +194,11 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
     let forwardStatus: 'success' | 'failed' = 'success';
     let errorMessage: string | undefined = undefined;
 
-    if (!shouldForward) {
+    if (isPrivateSelfChat) {
+      // Don't forward to self, message was already answered directly
+      forwardStatus = 'success';
+      forwardMethod = 'simulated';
+    } else if (!shouldForward) {
       addLog('info', `Сообщение пропущено: нет совпадений по ключевым словам (${watchedKeywords.join(', ')})`);
       forwardStatus = 'success';
       forwardMethod = 'simulated';
@@ -253,7 +298,10 @@ async function ensurePollingRunning() {
         currentBot.stop('Restarting polling');
       } catch (e) {}
       isPollingRunning = false;
+      // Brief pause to allow sockets to cleanly close
+      await new Promise((r) => setTimeout(r, 200));
     }
+    
     // Delete any active webhook first so Telegram allows getUpdates
     await currentBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
     
@@ -265,7 +313,7 @@ async function ensurePollingRunning() {
     });
     isPollingRunning = true;
     botMode = 'polling';
-    addLog('success', '🚀 Polling запущен: бот подключен к Telegram и слушает новые сообщения');
+    addLog('success', '🚀 Polling запущен: бот слушает все входящие сообщения в Telegram');
   } catch (err: any) {
     addLog('error', `Не удалось запустить Polling: ${err.message}`);
   }
@@ -394,6 +442,8 @@ app.post('/api/config', (req, res) => {
     'info',
     `Настройки обновлены: Chat ID = ${myChatId || 'не задан'}, Ключевых слов: ${watchedKeywords.length}, Пересылка всех: ${forwardAllMessages ? 'Да' : 'Только по ключевым словам'}`
   );
+
+  saveConfigToDisk();
 
   // Automatically start Long Polling so the user doesn't need to manually click start
   // If token or chatId provided, ensure bot is initialized and polling is active
