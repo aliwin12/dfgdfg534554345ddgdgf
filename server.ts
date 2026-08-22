@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // In-memory application state
-let botToken: string = process.env.BOT_TOKEN || '';
+let botToken: string = process.env.BOT_TOKEN || '8988916261:AAF1b0yLepEVgdUPSike9NsENbWuTlHc4wc';
 let myChatId: string = process.env.MY_CHAT_ID || '';
 let botMode: 'webhook' | 'polling' | 'idle' = botToken ? 'webhook' : 'idle';
 let currentBot: Telegraf | null = null;

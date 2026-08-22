@@ -38,6 +38,13 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
   const [customWebhookUrl, setCustomWebhookUrl] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Sync chatIdInput if config loads after mount
+  React.useEffect(() => {
+    if (config?.myChatId && !chatIdInput) {
+      setChatIdInput(config.myChatId);
+    }
+  }, [config?.myChatId]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     await onSaveConfig(tokenInput, chatIdInput);

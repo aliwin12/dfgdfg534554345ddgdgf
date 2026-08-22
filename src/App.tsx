@@ -43,14 +43,22 @@ export default function App() {
     }, 4000);
   };
 
+  // Safe JSON helper to prevent syntax errors if server returns non-JSON/HTML
+  const safeFetchJson = async (url: string, options?: RequestInit) => {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await res.text();
+      throw new Error(text || `Сервер вернул статус ${res.status}`);
+    }
+    return res.json();
+  };
+
   // Fetch Config
   const loadConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/config');
-      if (res.ok) {
-        const data: BotConfig = await res.json();
-        setConfig(data);
-      }
+      const data: BotConfig = await safeFetchJson('/api/config');
+      setConfig(data);
     } catch (e) {
       console.error('Error fetching config:', e);
     }
@@ -59,11 +67,8 @@ export default function App() {
   // Fetch Messages History
   const loadMessages = useCallback(async () => {
     try {
-      const res = await fetch('/api/messages');
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || []);
-      }
+      const data = await safeFetchJson('/api/messages');
+      setMessages(data.messages || []);
     } catch (e) {
       console.error('Error fetching messages:', e);
     }
@@ -72,11 +77,8 @@ export default function App() {
   // Fetch Server Logs
   const loadLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/logs');
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.logs || []);
-      }
+      const data = await safeFetchJson('/api/logs');
+      setLogs(data.logs || []);
     } catch (e) {
       console.error('Error fetching logs:', e);
     }
@@ -85,19 +87,16 @@ export default function App() {
   // Fetch Telegram API Status
   const loadTelegramStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/telegram/status');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.configured) {
-          setBotInfo(data.bot || null);
-          setWebhookInfo(data.webhook || null);
-          setBotError(data.botError || null);
-          setWebhookError(data.webhookError || null);
-          setIsPolling(data.isPolling || false);
-        } else {
-          setBotInfo(null);
-          setWebhookInfo(null);
-        }
+      const data = await safeFetchJson('/api/telegram/status');
+      if (data.configured) {
+        setBotInfo(data.bot || null);
+        setWebhookInfo(data.webhook || null);
+        setBotError(data.botError || null);
+        setWebhookError(data.webhookError || null);
+        setIsPolling(data.isPolling || false);
+      } else {
+        setBotInfo(null);
+        setWebhookInfo(null);
       }
     } catch (e) {
       console.error('Error fetching Telegram status:', e);
@@ -130,12 +129,11 @@ export default function App() {
   const handleSaveConfig = async (token: string, chatId: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/config', {
+      const data = await safeFetchJson('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, chatId }),
       });
-      const data = await res.json();
       if (data.success) {
         showToast('Настройки бота успешно сохранены!', 'success');
         await refreshAll();
@@ -153,12 +151,11 @@ export default function App() {
   const handleSetWebhook = async (customUrl?: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/telegram/set-webhook', {
+      const data = await safeFetchJson('/api/telegram/set-webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: customUrl }),
       });
-      const data = await res.json();
       if (data.success) {
         showToast(`Webhook успешно привязан: ${data.url}`, 'success');
         await refreshAll();
@@ -176,12 +173,11 @@ export default function App() {
   const handleDeleteWebhook = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/telegram/delete-webhook', {
+      const data = await safeFetchJson('/api/telegram/delete-webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dropPendingUpdates: true }),
       });
-      const data = await res.json();
       if (data.success) {
         showToast('Webhook успешно удален из Telegram API', 'info');
         await refreshAll();
@@ -199,10 +195,9 @@ export default function App() {
   const handleTogglePolling = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/telegram/toggle-polling', {
+      const data = await safeFetchJson('/api/telegram/toggle-polling', {
         method: 'POST',
       });
-      const data = await res.json();
       if (data.success) {
         showToast(
           data.isPolling ? 'Long Polling успешно запущен!' : 'Long Polling остановлен',
@@ -223,11 +218,10 @@ export default function App() {
   const handleSendTestMessage = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/telegram/send-test', {
+      const data = await safeFetchJson('/api/telegram/send-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
       if (data.success) {
         showToast('Тестовое сообщение отправлено в ваш Telegram ЛС!', 'success');
       } else {
@@ -244,12 +238,11 @@ export default function App() {
   const handleSimulate = async (groupTitle: string, senderName: string, text: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/telegram/simulate-message', {
+      const data = await safeFetchJson('/api/telegram/simulate-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ groupTitle, senderName, text }),
       });
-      const data = await res.json();
       if (data.success) {
         showToast('Симуляция выполнена! Сообщение добавлено в монитор', 'success');
         await loadMessages();
