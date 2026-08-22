@@ -244,6 +244,33 @@ function escapeHtml(unsafe: string) {
     .replace(/'/g, '&#039;');
 }
 
+// Helper to launch polling reliably
+async function ensurePollingRunning() {
+  if (!currentBot || !botToken) return;
+  try {
+    if (isPollingRunning) {
+      try {
+        currentBot.stop('Restarting polling');
+      } catch (e) {}
+      isPollingRunning = false;
+    }
+    // Delete any active webhook first so Telegram allows getUpdates
+    await currentBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+    
+    currentBot.launch({
+      allowedUpdates: ['message', 'channel_post', 'edited_message'],
+    }).catch((e: any) => {
+      addLog('error', `Ошибка в процессе polling: ${e.message}`);
+      isPollingRunning = false;
+    });
+    isPollingRunning = true;
+    botMode = 'polling';
+    addLog('success', '🚀 Polling запущен: бот подключен к Telegram и слушает новые сообщения');
+  } catch (err: any) {
+    addLog('error', `Не удалось запустить Polling: ${err.message}`);
+  }
+}
+
 // Bot Setup & Init
 function initBotInstance(token: string) {
   if (isPollingRunning && currentBot) {
@@ -266,14 +293,21 @@ function initBotInstance(token: string) {
     const bot = new Telegraf(token.trim());
 
     // Bot Commands & Handlers
-    bot.start((ctx) => {
+    bot.start(async (ctx) => {
       const from = ctx.from;
-      const response = `👋 <b>Бот-пересыльщик активен!</b>\n\nВаш Chat ID: <code>${from.id}</code>\n\nДобавьте меня в группы, отключите приватность в @BotFather (/setprivacy -> Disable), и я буду пересылать все сообщения в ваш личный чат.`;
-      ctx.replyWithHTML(response);
+      const response = `👋 <b>Бот-пересыльщик активен!</b>\n\nВаш Chat ID: <code>${from.id}</code>\n\nОтправьте этот ID в настройки веб-панели (поле MY_CHAT_ID), добавьте бота в нужные группы/каналы, и бот будет пересылать все сообщения вам!`;
+      try {
+        await ctx.replyWithHTML(response);
+        addLog('success', `Пользователь @${from.username || from.first_name} (ID: ${from.id}) запустил бота через /start`);
+      } catch (e: any) {
+        console.error('Error in /start reply:', e);
+      }
     });
 
-    bot.command('myid', (ctx) => {
-      ctx.replyWithHTML(`Ваш Telegram Chat ID: <code>${ctx.chat.id}</code>`);
+    bot.command('myid', async (ctx) => {
+      try {
+        await ctx.replyWithHTML(`Ваш Telegram Chat ID: <code>${ctx.chat.id}</code>`);
+      } catch (e) {}
     });
 
     bot.on(['message', 'channel_post'], async (ctx) => {
@@ -281,7 +315,7 @@ function initBotInstance(token: string) {
     });
 
     bot.catch((err: any, ctx: any) => {
-      addLog('error', `Telegraf ошибка: ${err.message}`, { updateType: ctx.updateType });
+      addLog('error', `Telegraf ошибка: ${err.message}`, { updateType: ctx?.updateType });
     });
 
     currentBot = bot;
@@ -297,23 +331,8 @@ function initBotInstance(token: string) {
 // Initialize on startup if token exists
 if (botToken) {
   const bot = initBotInstance(botToken);
-  if (bot && myChatId) {
-    (async () => {
-      try {
-        await bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-        bot.launch({
-          allowedUpdates: ['message', 'channel_post', 'edited_message'],
-        }).catch((e: any) => {
-          addLog('error', `Ошибка в процессе polling: ${e.message}`);
-          isPollingRunning = false;
-        });
-        isPollingRunning = true;
-        botMode = 'polling';
-        addLog('success', '🚀 Бот автоматически запущен на старте сервера в режиме Long Polling!');
-      } catch (err: any) {
-        addLog('warn', `Автозапуск Polling: ${err.message}`);
-      }
-    })();
+  if (bot) {
+    ensurePollingRunning();
   }
 }
 
@@ -377,23 +396,9 @@ app.post('/api/config', (req, res) => {
   );
 
   // Automatically start Long Polling so the user doesn't need to manually click start
-  if (currentBot && botToken && myChatId && !isPollingRunning) {
-    (async () => {
-      try {
-        await currentBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
-        currentBot.launch({
-          allowedUpdates: ['message', 'channel_post', 'edited_message'],
-        }).catch((e: any) => {
-          addLog('error', `Ошибка в процессе polling: ${e.message}`);
-          isPollingRunning = false;
-        });
-        isPollingRunning = true;
-        botMode = 'polling';
-        addLog('success', '🚀 Бот автоматически запущен в режиме Long Polling и слушает Telegram!');
-      } catch (err: any) {
-        addLog('warn', `Автозапуск Polling: ${err.message}`);
-      }
-    })();
+  // If token or chatId provided, ensure bot is initialized and polling is active
+  if (currentBot && botToken) {
+    ensurePollingRunning();
   }
 
   res.json({
