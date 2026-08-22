@@ -176,10 +176,11 @@ export default function App() {
   const handleSetWebhook = async (customUrl?: string) => {
     setIsLoading(true);
     try {
+      const targetUrl = customUrl || `${window.location.origin}/api/telegram-webhook`;
       const data = await safeFetchJson('/api/telegram/set-webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: customUrl }),
+        body: JSON.stringify({ url: targetUrl }),
       });
       if (data.success) {
         showToast(`Webhook успешно привязан: ${data.url}`, 'success');
