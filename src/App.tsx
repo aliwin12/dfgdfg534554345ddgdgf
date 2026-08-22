@@ -108,15 +108,22 @@ export default function App() {
   }, []);
 
   // Refresh all
-  const refreshAll = useCallback(async () => {
-    setIsLoading(true);
-    await Promise.all([loadConfig(), loadMessages(), loadLogs(), loadTelegramStatus()]);
-    setIsLoading(false);
+  const refreshAll = useCallback(async (isManual = false) => {
+    if (isManual) {
+      setIsLoading(true);
+    }
+    // Fast parallel fetch without blocking page render
+    await Promise.allSettled([loadConfig(), loadMessages(), loadLogs()]);
+    if (isManual) {
+      setIsLoading(false);
+    }
+    // Load telegram diagnostics in background
+    loadTelegramStatus();
   }, [loadConfig, loadMessages, loadLogs, loadTelegramStatus]);
 
-  // Initial load
+  // Instant non-blocking Initial load
   useEffect(() => {
-    refreshAll();
+    refreshAll(false);
   }, [refreshAll]);
 
   // Auto-refresh interval (for messages & logs feed)
@@ -332,7 +339,7 @@ export default function App() {
         botInfo={botInfo}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onRefresh={refreshAll}
+        onRefresh={() => refreshAll(true)}
         isLoading={isLoading}
         onOpenSimulate={() => setIsSimulateOpen(true)}
       />

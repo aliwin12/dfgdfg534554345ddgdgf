@@ -380,6 +380,11 @@ app.post('/api/config', (req, res) => {
   });
 });
 
+// Cached Telegram Status
+let cachedTelegramStatus: any = null;
+let lastStatusFetchTime = 0;
+const STATUS_CACHE_TTL = 15000; // 15 seconds cache
+
 // Telegram API Proxy & Diagnostics
 app.get('/api/telegram/status', async (req, res) => {
   if (!botToken || !currentBot) {
@@ -389,41 +394,72 @@ app.get('/api/telegram/status', async (req, res) => {
     });
   }
 
+  const now = Date.now();
+  const forceRefresh = req.query.force === 'true';
+
+  if (!forceRefresh && cachedTelegramStatus && now - lastStatusFetchTime < STATUS_CACHE_TTL) {
+    return res.json({
+      ...cachedTelegramStatus,
+      isPolling: isPollingRunning,
+    });
+  }
+
   try {
-    const [botInfo, webhookInfo] = await Promise.allSettled([
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Telegram API timeout')), 2500)
+    );
+
+    const fetchPromise = Promise.allSettled([
       currentBot.telegram.getMe(),
       currentBot.telegram.getWebhookInfo(),
     ]);
 
-    let botData = null;
-    let webhookData = null;
+    const result: any = await Promise.race([fetchPromise, timeoutPromise]);
+
+    let botData = cachedTelegramStatus?.bot || null;
+    let webhookData = cachedTelegramStatus?.webhook || null;
     let botError = null;
     let webhookError = null;
 
-    if (botInfo.status === 'fulfilled') {
-      botData = botInfo.value;
-    } else {
-      botError = botInfo.reason?.message || 'Не удалось получить информацию о боте';
+    if (Array.isArray(result)) {
+      const [botInfo, webhookInfo] = result;
+      if (botInfo.status === 'fulfilled') {
+        botData = botInfo.value;
+      } else {
+        botError = botInfo.reason?.message || 'Не удалось получить информацию о боте';
+      }
+
+      if (webhookInfo.status === 'fulfilled') {
+        webhookData = webhookInfo.value;
+      } else {
+        webhookError = webhookInfo.reason?.message || 'Не удалось получить статус Webhook';
+      }
     }
 
-    if (webhookInfo.status === 'fulfilled') {
-      webhookData = webhookInfo.value;
-    } else {
-      webhookError = webhookInfo.reason?.message || 'Не удалось получить статус Webhook';
-    }
-
-    res.json({
+    cachedTelegramStatus = {
       configured: true,
       bot: botData,
       webhook: webhookData,
       isPolling: isPollingRunning,
       botError,
       webhookError,
-    });
+    };
+    lastStatusFetchTime = Date.now();
+
+    res.json(cachedTelegramStatus);
   } catch (err: any) {
-    res.status(500).json({
+    if (cachedTelegramStatus) {
+      return res.json({
+        ...cachedTelegramStatus,
+        isPolling: isPollingRunning,
+      });
+    }
+    res.json({
       configured: true,
-      error: err.message || 'Ошибка запроса к Telegram API',
+      bot: null,
+      webhook: null,
+      isPolling: isPollingRunning,
+      botError: 'Telegram API не ответил вовремя',
     });
   }
 });
