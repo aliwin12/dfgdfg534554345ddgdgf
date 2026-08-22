@@ -49,6 +49,10 @@ export default function App() {
     const contentType = res.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await res.text();
+      // If server returned 200 OK (e.g. plain text "200" or HTML), treat as success or return structured info
+      if (res.ok) {
+        return { success: true, message: text || 'OK', isTextResponse: true };
+      }
       throw new Error(text || `Сервер вернул статус ${res.status}`);
     }
     return res.json();
