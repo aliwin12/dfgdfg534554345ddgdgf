@@ -1,0 +1,7 @@
+{
+  "name": "Telegram Forwarder Bot Server",
+  "description": "Server and dashboard for forwarding and backing up group messages to your personal Telegram chat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
