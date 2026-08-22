@@ -350,12 +350,33 @@ app.post('/api/config', (req, res) => {
     `Настройки обновлены: Chat ID = ${myChatId || 'не задан'}, Ключевых слов: ${watchedKeywords.length}, Пересылка всех: ${forwardAllMessages ? 'Да' : 'Только по ключевым словам'}`
   );
 
+  // Automatically start Long Polling so the user doesn't need to manually click start
+  if (currentBot && botToken && myChatId && !isPollingRunning) {
+    (async () => {
+      try {
+        await currentBot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+        currentBot.launch({
+          allowedUpdates: ['message', 'channel_post', 'edited_message'],
+        }).catch((e: any) => {
+          addLog('error', `Ошибка в процессе polling: ${e.message}`);
+          isPollingRunning = false;
+        });
+        isPollingRunning = true;
+        botMode = 'polling';
+        addLog('success', '🚀 Бот автоматически запущен в режиме Long Polling и слушает Telegram!');
+      } catch (err: any) {
+        addLog('warn', `Автозапуск Polling: ${err.message}`);
+      }
+    })();
+  }
+
   res.json({
     success: true,
-    message: 'Настройки успешно сохранены',
+    message: 'Настройки сохранены и бот автоматически запущен!',
     keywords: watchedKeywords,
     forwardAllMessages,
     notifyOnKeyword,
+    isPolling: isPollingRunning,
   });
 });
 

@@ -151,8 +151,10 @@ export default function App() {
         }),
       });
       if (data.success) {
-        showToast('Настройки бота и ключевые слова успешно сохранены!', 'success');
+        showToast('🚀 Бот активирован и начал слушать сообщения!', 'success');
         await refreshAll();
+        // Automatically switch to Monitor tab so the user sees incoming messages
+        setActiveTab('monitor');
       } else {
         showToast(data.error || 'Ошибка сохранения настроек', 'error');
       }
