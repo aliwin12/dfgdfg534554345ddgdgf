@@ -409,7 +409,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.post('/api/config', (req, res) => {
+app.post('/api/config', async (req, res) => {
   const { token, chatId, keywords, forwardAll, notifyKeywords } = req.body;
 
   if (typeof chatId === 'string') {
@@ -445,18 +445,39 @@ app.post('/api/config', (req, res) => {
 
   saveConfigToDisk();
 
-  // Automatically start Long Polling so the user doesn't need to manually click start
-  // If token or chatId provided, ensure bot is initialized and polling is active
-  if (currentBot && botToken) {
+  // If running on a public HTTPS domain (e.g. Cloud Run), auto-register Webhook for 100% reliability
+  const host = req.get('host') || '';
+  const isPublicDomain = host.includes('.run.app') || host.includes('.app') || host.includes('.dev') || req.get('x-forwarded-proto') === 'https';
+
+  if (isPublicDomain && currentBot && botToken) {
+    const proto = req.get('x-forwarded-proto') || 'https';
+    const autoWebhookUrl = `${proto}://${host}/api/telegram-webhook`;
+    try {
+      if (isPollingRunning) {
+        try { currentBot.stop('Switching to auto-webhook'); } catch (e) {}
+        isPollingRunning = false;
+      }
+      await currentBot.telegram.setWebhook(autoWebhookUrl, {
+        drop_pending_updates: false,
+        allowed_updates: ['message', 'channel_post', 'edited_message'],
+      });
+      botMode = 'webhook';
+      addLog('success', `⚡ Webhook автоматически привязан к облачному серверу: ${autoWebhookUrl}`);
+    } catch (whErr: any) {
+      addLog('warn', `Авто-привязка Webhook: ${whErr.message}. Запускаем Polling как запасной вариант.`);
+      ensurePollingRunning();
+    }
+  } else if (currentBot && botToken) {
     ensurePollingRunning();
   }
 
   res.json({
     success: true,
-    message: 'Настройки сохранены и бот автоматически запущен!',
+    message: 'Настройки сохранены и бот готов к приему сообщений!',
     keywords: watchedKeywords,
     forwardAllMessages,
     notifyOnKeyword,
+    botMode,
     isPolling: isPollingRunning,
   });
 });
@@ -634,22 +655,114 @@ app.post('/api/telegram/toggle-polling', async (req, res) => {
 // Send Test Message directly to MY_CHAT_ID
 app.post('/api/telegram/send-test', async (req, res) => {
   if (!botToken || !currentBot) {
-    return res.status(400).json({ success: false, error: 'Токен бота не настроен' });
+    return res.status(400).json({ success: false, error: 'Токен бота не настроен. Сохраните токен в настройках.' });
   }
   if (!myChatId) {
-    return res.status(400).json({ success: false, error: 'MY_CHAT_ID не указан' });
+    return res.status(400).json({ success: false, error: 'MY_CHAT_ID не указан. Введите ваш Telegram ID.' });
   }
 
   try {
-    const text = req.body.text || `🔔 <b>Тестовое сообщение от Telegram Forwarder Server</b>\n\nСервер работает штатно!\n📅 Время: <code>${new Date().toLocaleString('ru-RU')}</code>\n🔗 Режим: <code>${isPollingRunning ? 'Long Polling' : 'Webhook Serverless'}</code>`;
+    const text = req.body.text || `🔔 <b>Тестовое сообщение от Telegram Forwarder Server</b>\n\n✅ Сервер работает штатно!\n📅 Время: <code>${new Date().toLocaleString('ru-RU')}</code>\n🔗 Режим: <code>${botMode === 'webhook' ? 'Webhook (Облачный)' : 'Long Polling'}</code>`;
     
     await currentBot.telegram.sendMessage(myChatId, text, { parse_mode: 'HTML' });
     addLog('success', `Тестовое сообщение успешно отправлено в ЛС (ID: ${myChatId})`);
     res.json({ success: true });
   } catch (err: any) {
-    addLog('error', `Не удалось отправить тестовое сообщение: ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
+    const errMsg = err.message || String(err);
+    addLog('error', `Не удалось отправить тестовое сообщение в ID ${myChatId}: ${errMsg}`);
+    res.status(500).json({ success: false, error: errMsg });
   }
+});
+
+// Full Auto-Fix and Health Verification
+app.post('/api/telegram/auto-fix', async (req, res) => {
+  if (!botToken || !currentBot) {
+    return res.status(400).json({ success: false, error: 'Токен бота не настроен' });
+  }
+
+  const steps: { step: string; status: 'ok' | 'error' | 'skipped'; message: string }[] = [];
+
+  // Step 1: Check Bot Token with Telegram
+  try {
+    const me = await currentBot.telegram.getMe();
+    steps.push({
+      step: 'bot_auth',
+      status: 'ok',
+      message: `Бот авторизован: @${me.username} (${me.first_name})`,
+    });
+  } catch (e: any) {
+    steps.push({
+      step: 'bot_auth',
+      status: 'error',
+      message: `Ошибка токена: ${e.message}`,
+    });
+    return res.json({ success: false, steps, error: 'Токен бота недействителен' });
+  }
+
+  // Step 2: Configure Webhook on public URL
+  const host = req.get('host') || '';
+  const proto = req.get('x-forwarded-proto') || 'https';
+  const webhookUrl = `${proto}://${host}/api/telegram-webhook`;
+
+  try {
+    if (isPollingRunning) {
+      try { currentBot.stop('Auto-fix switching to webhook'); } catch (e) {}
+      isPollingRunning = false;
+    }
+    await currentBot.telegram.setWebhook(webhookUrl, {
+      drop_pending_updates: false,
+      allowed_updates: ['message', 'channel_post', 'edited_message'],
+    });
+    botMode = 'webhook';
+    steps.push({
+      step: 'webhook',
+      status: 'ok',
+      message: `Webhook успешно привязан к: ${webhookUrl}`,
+    });
+    addLog('success', `[Auto-Fix] Webhook установлен на ${webhookUrl}`);
+  } catch (e: any) {
+    steps.push({
+      step: 'webhook',
+      status: 'error',
+      message: `Не удалось установить Webhook: ${e.message}`,
+    });
+  }
+
+  // Step 3: Test send message if chat ID configured
+  if (myChatId) {
+    try {
+      await currentBot.telegram.sendMessage(
+        myChatId,
+        `🛠 <b>Авто-проверка Telegram Forwarder</b>\n\n✅ Связь с облачным сервером успешно налажена!\n⚡ Режим: <code>Webhook Active</code>\n🌐 Сервер: <code>${host}</code>`,
+        { parse_mode: 'HTML' }
+      );
+      steps.push({
+        step: 'send_test',
+        status: 'ok',
+        message: `Тестовое сообщение успешно доставлено в ваш Telegram (ID ${myChatId})`,
+      });
+      addLog('success', `[Auto-Fix] Тестовое сообщение доставлено пользователю ${myChatId}`);
+    } catch (e: any) {
+      steps.push({
+        step: 'send_test',
+        status: 'error',
+        message: `Ошибка отправки в ID ${myChatId}: ${e.message}`,
+      });
+    }
+  } else {
+    steps.push({
+      step: 'send_test',
+      status: 'skipped',
+      message: 'MY_CHAT_ID не указан. Укажите ваш ID в настройках.',
+    });
+  }
+
+  const allOk = steps.every((s) => s.status === 'ok' || s.status === 'skipped');
+  res.json({
+    success: allOk,
+    steps,
+    botMode,
+  });
 });
 
 // Simulate Message from Group
@@ -717,21 +830,24 @@ app.post('/api/telegram/simulate-message', async (req, res) => {
 // Inbound Webhook Handlers
 app.post(['/api/telegram-webhook', '/api/bot'], async (req, res) => {
   try {
-    addLog('info', `Получен входящий POST-запрос на Webhook (Update ID: ${req.body?.update_id || 'N/A'})`);
+    const updateId = req.body?.update_id;
+    addLog('info', `Получен входящий POST-запрос на Webhook (Update ID: ${updateId || 'N/A'})`);
 
-    if (currentBot) {
-      await currentBot.handleUpdate(req.body, res);
+    if (currentBot && req.body) {
+      await currentBot.handleUpdate(req.body);
       if (!res.headersSent) {
         res.status(200).json({ ok: true });
       }
     } else {
       addLog('warn', 'Получен вебхук, но экземпляр бота не инициализирован');
-      res.status(200).json({ ok: true, note: 'bot not initialized' });
+      if (!res.headersSent) {
+        res.status(200).json({ ok: true, note: 'bot not initialized' });
+      }
     }
   } catch (err: any) {
     addLog('error', `Ошибка в обработчике вебхука: ${err.message}`);
     if (!res.headersSent) {
-      res.status(500).json({ ok: false, error: err.message });
+      res.status(200).json({ ok: true, error: err.message });
     }
   }
 });

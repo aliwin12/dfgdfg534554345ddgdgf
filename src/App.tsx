@@ -260,6 +260,29 @@ export default function App() {
     }
   };
 
+  // Full Auto-Fix & Diagnostics
+  const handleAutoFix = async () => {
+    setIsLoading(true);
+    try {
+      const data = await safeFetchJson('/api/telegram/auto-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      await refreshAll();
+      if (data.success) {
+        showToast('🛠 Все тесты пройдены успешно! Webhook привязан к серверу', 'success');
+      } else {
+        showToast(`Диагностика: обнаружены замечания. Проверьте детали`, 'error');
+      }
+      return data;
+    } catch (err: any) {
+      showToast(err.message || 'Ошибка выполнения авто-диагностики', 'error');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Simulate incoming group message
   const handleSimulate = async (groupTitle: string, senderName: string, text: string) => {
     setIsLoading(true);
@@ -376,6 +399,7 @@ export default function App() {
             onDeleteWebhook={handleDeleteWebhook}
             onTogglePolling={handleTogglePolling}
             onSendTestMessage={handleSendTestMessage}
+            onAutoFix={handleAutoFix}
             isLoading={isLoading}
           />
         )}

@@ -15,6 +15,9 @@ import {
   X,
   Sliders,
   Sparkles,
+  Wrench,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 
 interface BotConfigPanelProps {
@@ -30,6 +33,7 @@ interface BotConfigPanelProps {
   onDeleteWebhook: () => Promise<void>;
   onTogglePolling: () => Promise<void>;
   onSendTestMessage: () => Promise<void>;
+  onAutoFix?: () => Promise<any>;
   isLoading: boolean;
 }
 
@@ -53,12 +57,39 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
   onDeleteWebhook,
   onTogglePolling,
   onSendTestMessage,
+  onAutoFix,
   isLoading,
 }) => {
   const [tokenInput, setTokenInput] = useState('');
   const [chatIdInput, setChatIdInput] = useState(config?.myChatId || '');
   const [customWebhookUrl, setCustomWebhookUrl] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [autoFixResult, setAutoFixResult] = useState<{
+    running: boolean;
+    success?: boolean;
+    steps?: { step: string; status: 'ok' | 'error' | 'skipped'; message: string }[];
+    error?: string;
+  } | null>(null);
+
+  const handleRunAutoFix = async () => {
+    if (!onAutoFix) return;
+    setAutoFixResult({ running: true });
+    try {
+      const res = await onAutoFix();
+      setAutoFixResult({
+        running: false,
+        success: res.success,
+        steps: res.steps,
+        error: res.error,
+      });
+    } catch (e: any) {
+      setAutoFixResult({
+        running: false,
+        success: false,
+        error: e.message,
+      });
+    }
+  };
 
   // Keyword notification settings
   const [keywords, setKeywords] = useState<string[]>(
@@ -344,42 +375,82 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
 
       {/* Quick Launch & Test Banner when Configured */}
       {config?.isConfigured && (
-        <div className="bg-gradient-to-r from-emerald-950/70 via-neutral-900 to-sky-950/70 border border-emerald-800/60 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-              <span>Шаг 2 выполнен: Бот подключен! Что делать дальше:</span>
+        <div className="bg-gradient-to-r from-emerald-950/70 via-neutral-900 to-sky-950/70 border border-emerald-800/60 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span>Бот сконфигурирован</span>
+              </div>
+              <p className="text-xs text-neutral-300 max-w-xl">
+                Если сообщения не доходят или сайт был перезапущен, нажмите <b>«Авто-диагностика и починка»</b> — сервер сам проверит токен, привяжет Webhook к текущему сайту и пришлет тестовый пинг в Telegram.
+              </p>
             </div>
-            <p className="text-xs text-neutral-300 max-w-xl">
-              Проверьте доставку сообщений кнопкой теста или сразу перейдите в <b>«Монитор сообщений»</b>, чтобы видеть историю и срабатывания ключевых слов в реальном времени.
-            </p>
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                id="btn-auto-fix"
+                type="button"
+                disabled={isLoading || autoFixResult?.running}
+                onClick={handleRunAutoFix}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-bold shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2"
+              >
+                {autoFixResult?.running ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-neutral-950" />
+                ) : (
+                  <Wrench className="w-4 h-4 text-neutral-950" />
+                )}
+                <span>{autoFixResult?.running ? 'Проверяем...' : '🛠 Авто-диагностика и починка в 1 клик'}</span>
+              </button>
+              <button
+                id="btn-quick-test-ping"
+                type="button"
+                disabled={isLoading || autoFixResult?.running}
+                onClick={onSendTestMessage}
+                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow transition-all flex items-center gap-2"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Отправить тест в ЛС
+              </button>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              id="btn-quick-test-ping"
-              type="button"
-              disabled={isLoading}
-              onClick={onSendTestMessage}
-              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow transition-all flex items-center gap-2"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Отправить тестовый пинг в ЛС
-            </button>
-            <button
-              id="btn-quick-toggle-polling"
-              type="button"
-              disabled={isLoading}
-              onClick={onTogglePolling}
-              className={`px-4 py-2 rounded-xl text-white text-xs font-semibold shadow transition-all flex items-center gap-2 ${
-                config?.mode === 'polling'
-                  ? 'bg-rose-600 hover:bg-rose-500'
-                  : 'bg-emerald-600 hover:bg-emerald-500'
-              }`}
-            >
-              <Radio className="w-3.5 h-3.5" />
-              {config?.mode === 'polling' ? 'Остановить Polling' : 'Включить Long Polling'}
-            </button>
-          </div>
+
+          {/* Auto-Fix Results Box */}
+          {autoFixResult && !autoFixResult.running && (
+            <div className={`p-4 rounded-xl border ${autoFixResult.success ? 'bg-emerald-950/40 border-emerald-800/80' : 'bg-rose-950/40 border-rose-800/80'} space-y-2`}>
+              <div className="flex items-center justify-between">
+                <span className={`text-xs font-bold flex items-center gap-1.5 ${autoFixResult.success ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {autoFixResult.success ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                  {autoFixResult.success ? 'Все тесты пройдены успешно! Связь налажена.' : 'Обнаружены ошибки связи:'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAutoFixResult(null)}
+                  className="text-neutral-400 hover:text-neutral-200 text-xs"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              {autoFixResult.steps && autoFixResult.steps.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  {autoFixResult.steps.map((st, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-[11px]">
+                      {st.status === 'ok' && <span className="text-emerald-400 font-bold shrink-0">✓</span>}
+                      {st.status === 'error' && <span className="text-rose-400 font-bold shrink-0">✕</span>}
+                      {st.status === 'skipped' && <span className="text-amber-400 font-bold shrink-0">⚠</span>}
+                      <span className={st.status === 'error' ? 'text-rose-200 font-semibold' : 'text-neutral-200'}>
+                        {st.message}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {autoFixResult.error && (
+                <p className="text-xs text-rose-300 font-mono mt-1 bg-rose-950/80 p-2 rounded border border-rose-900">
+                  {autoFixResult.error}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
