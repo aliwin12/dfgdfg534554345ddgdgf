@@ -1,4 +1,4 @@
-const { Telegraf } = require('telegraf');
+import { Telegraf } from 'telegraf';
 
 const token = process.env.BOT_TOKEN || '8988916261:AAF1b0yLepEVgdUPSike9NsENbWuTlHc4wc';
 const myChatId = process.env.MY_CHAT_ID;
@@ -43,8 +43,8 @@ bot.on(['message', 'channel_post'], async (ctx) => {
   }
 });
 
-// Экспорт Serverless функции для Vercel и Express
-module.exports = async (req, res) => {
+// Экспорт Serverless функции для Vercel (ES Module)
+export default async function handler(req, res) {
   try {
     if (req.method === 'POST') {
       await bot.handleUpdate(req.body, res);
@@ -59,4 +59,5 @@ module.exports = async (req, res) => {
     console.error('Webhook handler error:', error);
     res.status(500).send('Internal Server Error');
   }
-};
+}
+
