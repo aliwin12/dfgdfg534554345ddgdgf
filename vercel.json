@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/bot",
+      "destination": "/api/bot"
+    },
+    {
+      "source": "/bot",
+      "destination": "/api/bot"
+    }
+  ]
+}
