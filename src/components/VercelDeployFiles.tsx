@@ -77,16 +77,8 @@ export default async function handler(req, res) {
       lang: 'json',
       content: `{
   "version": 2,
-  "rewrites": [
-    {
-      "source": "/api/bot",
-      "destination": "/api/bot"
-    },
-    {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
-    }
-  ]
+  "buildCommand": "vite build",
+  "outputDirectory": "dist"
 }`,
     },
     package: {
