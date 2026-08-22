@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BotConfig } from '../types';
 import {
   Save,
@@ -8,21 +8,43 @@ import {
   Send,
   Trash2,
   HelpCircle,
-  ExternalLink,
-  ShieldCheck,
   CheckCircle2,
-  AlertCircle,
+  BellRing,
+  Tag,
+  Plus,
+  X,
+  Sliders,
+  Sparkles,
 } from 'lucide-react';
 
 interface BotConfigPanelProps {
   config: BotConfig | null;
-  onSaveConfig: (token: string, chatId: string) => Promise<void>;
+  onSaveConfig: (
+    token: string,
+    chatId: string,
+    keywords?: string[],
+    forwardAll?: boolean,
+    notifyKeywords?: boolean
+  ) => Promise<void>;
   onSetWebhook: (url?: string) => Promise<void>;
   onDeleteWebhook: () => Promise<void>;
   onTogglePolling: () => Promise<void>;
   onSendTestMessage: () => Promise<void>;
   isLoading: boolean;
 }
+
+const PRESET_KEYWORDS = [
+  'срочно',
+  'важно',
+  'цена',
+  'купить',
+  'заказ',
+  'помощь',
+  'клиент',
+  'оплата',
+  'бот',
+  'поддержка',
+];
 
 export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
   config,
@@ -38,16 +60,67 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
   const [customWebhookUrl, setCustomWebhookUrl] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Sync chatIdInput if config loads after mount
-  React.useEffect(() => {
+  // Keyword notification settings
+  const [keywords, setKeywords] = useState<string[]>(
+    config?.keywords && config.keywords.length > 0
+      ? config.keywords
+      : ['срочно', 'важно', 'цена', 'заказ', 'купить', 'помощь', 'клиент']
+  );
+  const [newKeywordInput, setNewKeywordInput] = useState('');
+  const [forwardAllMessages, setForwardAllMessages] = useState<boolean>(
+    config?.forwardAllMessages !== false
+  );
+  const [notifyOnKeyword, setNotifyOnKeyword] = useState<boolean>(
+    config?.notifyOnKeyword !== false
+  );
+
+  // Sync inputs if config updates from server
+  useEffect(() => {
     if (config?.myChatId && !chatIdInput) {
       setChatIdInput(config.myChatId);
     }
-  }, [config?.myChatId]);
+    if (config?.keywords && config.keywords.length > 0) {
+      setKeywords(config.keywords);
+    }
+    if (typeof config?.forwardAllMessages === 'boolean') {
+      setForwardAllMessages(config.forwardAllMessages);
+    }
+    if (typeof config?.notifyOnKeyword === 'boolean') {
+      setNotifyOnKeyword(config.notifyOnKeyword);
+    }
+  }, [config]);
+
+  const handleAddKeyword = (kwToAdd?: string) => {
+    const raw = (kwToAdd || newKeywordInput).trim().toLowerCase();
+    if (!raw) return;
+    if (!keywords.map((k) => k.toLowerCase()).includes(raw)) {
+      setKeywords([...keywords, raw]);
+    }
+    if (!kwToAdd) {
+      setNewKeywordInput('');
+    }
+  };
+
+  const handleRemoveKeyword = (kwToRemove: string) => {
+    setKeywords(keywords.filter((k) => k.toLowerCase() !== kwToRemove.toLowerCase()));
+  };
+
+  const handleKeyDownKeyword = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      handleAddKeyword();
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSaveConfig(tokenInput, chatIdInput);
+    await onSaveConfig(
+      tokenInput,
+      chatIdInput,
+      keywords,
+      forwardAllMessages,
+      notifyOnKeyword
+    );
     setTokenInput('');
   };
 
@@ -65,7 +138,7 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
           </p>
         </div>
 
-        <form onSubmit={handleSave} className="space-y-4">
+        <form onSubmit={handleSave} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* BOT_TOKEN */}
             <div className="space-y-2">
@@ -120,12 +193,139 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
             </div>
           </div>
 
+          {/* KEYWORDS & SMART ALERT TRIGGER SECTION */}
+          <div className="p-4 rounded-xl bg-neutral-950/90 border border-neutral-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <BellRing className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-neutral-100 uppercase tracking-wide">
+                    Ключевые слова и Моментальные Push-уведомления
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-400">
+                  Когда бот находит любое из этих слов в группе, он моментально присылает специальный звуковой алерт с деталями в ваш личный чат.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/30 font-medium flex items-center gap-1">
+                  <Tag className="w-3 h-3" />
+                  {keywords.length} активных триггеров
+                </span>
+              </div>
+            </div>
+
+            {/* Keyword tags list */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-neutral-300">
+                Список отслеживаемых ключевых слов:
+              </label>
+              <div className="flex flex-wrap items-center gap-2 min-h-[42px] p-2.5 rounded-xl bg-neutral-900/90 border border-neutral-800">
+                {keywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/70 border border-amber-700/60 text-amber-200 text-xs font-medium group transition-all hover:bg-amber-900/80"
+                  >
+                    <span>{kw}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveKeyword(kw)}
+                      className="text-amber-400 hover:text-amber-100 rounded-full p-0.5 transition-colors"
+                      title="Удалить слово"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+
+                {/* Input for new keyword */}
+                <div className="flex items-center gap-1 flex-1 min-w-[160px]">
+                  <input
+                    id="input-new-keyword"
+                    type="text"
+                    placeholder="Добавить слово и нажать Enter..."
+                    value={newKeywordInput}
+                    onChange={(e) => setNewKeywordInput(e.target.value)}
+                    onKeyDown={handleKeyDownKeyword}
+                    className="w-full bg-transparent text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none px-1.5 py-0.5"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddKeyword()}
+                    disabled={!newKeywordInput.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-30 text-neutral-950 text-xs font-semibold flex items-center gap-1 shrink-0"
+                  >
+                    <Plus className="w-3 h-3 text-neutral-950" />
+                    <span>Добавить</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick suggestions pills */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-neutral-500 flex items-center gap-1 mr-1">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  Быстрые подсказки:
+                </span>
+                {PRESET_KEYWORDS.filter((p) => !keywords.includes(p)).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => handleAddKeyword(preset)}
+                    className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 border border-neutral-800 transition-colors"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notification behavior toggles */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800/80 cursor-pointer hover:border-neutral-700 transition-colors">
+                <input
+                  id="checkbox-notify-on-keyword"
+                  type="checkbox"
+                  checked={notifyOnKeyword}
+                  onChange={(e) => setNotifyOnKeyword(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-950 text-amber-500 focus:ring-amber-500/20"
+                />
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-neutral-200 block">
+                    🚨 Мгновенный Push-алерт при совпадении
+                  </span>
+                  <span className="text-[11px] text-neutral-400 block leading-tight">
+                    Бот отправит отдельное громкое уведомление в ваш ЛС с плашкой «ВНИМАНИЕ: СРАБОТАЛО КЛЮЧЕВОЕ СЛОВО».
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800/80 cursor-pointer hover:border-neutral-700 transition-colors">
+                <input
+                  id="checkbox-forward-all"
+                  type="checkbox"
+                  checked={forwardAllMessages}
+                  onChange={(e) => setForwardAllMessages(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-neutral-700 bg-neutral-950 text-sky-500 focus:ring-sky-500/20"
+                />
+                <div className="space-y-0.5">
+                  <span className="text-xs font-semibold text-neutral-200 block">
+                    📬 Пересылать абсолютно все сообщения
+                  </span>
+                  <span className="text-[11px] text-neutral-400 block leading-tight">
+                    Если выключить, бот будет пересылать <b>только</b> сообщения, содержащие ключевые слова (режим строгого фильтра).
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <div className="flex items-center justify-end pt-2">
             <div className="flex items-center gap-3">
               {config?.isConfigured && (
                 <span className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1.5 rounded-xl">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  Ключи сохранены и готовы к работе
+                  Конфигурация активна
                 </span>
               )}
               <button
@@ -135,7 +335,7 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
                 className="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-sky-600/20 transition-all flex items-center gap-2"
               >
                 <Save className="w-4 h-4" />
-                <span>Сохранить настройки</span>
+                <span>Сохранить настройки и ключевые слова</span>
               </button>
             </div>
           </div>
@@ -151,7 +351,7 @@ export const BotConfigPanel: React.FC<BotConfigPanelProps> = ({
               <span>Шаг 2 выполнен: Бот подключен! Что делать дальше:</span>
             </div>
             <p className="text-xs text-neutral-300 max-w-xl">
-              Проверьте доставку сообщений кнопкой теста или сразу перейдите в <b>«Монитор сообщений»</b>, чтобы видеть историю в реальном времени.
+              Проверьте доставку сообщений кнопкой теста или сразу перейдите в <b>«Монитор сообщений»</b>, чтобы видеть историю и срабатывания ключевых слов в реальном времени.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">

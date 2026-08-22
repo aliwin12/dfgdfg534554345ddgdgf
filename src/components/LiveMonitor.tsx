@@ -38,6 +38,7 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
+  const [onlyKeywords, setOnlyKeywords] = useState<boolean>(false);
 
   // Distinct groups for dropdown
   const uniqueGroups = Array.from(
@@ -60,8 +61,9 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
 
     const groupMatch = selectedGroup === 'all' || msg.sourceChat.title === selectedGroup;
     const typeMatch = selectedType === 'all' || msg.messageType === selectedType;
+    const keywordMatch = !onlyKeywords || (msg.matchedKeywords && msg.matchedKeywords.length > 0);
 
-    return textMatch && groupMatch && typeMatch;
+    return textMatch && groupMatch && typeMatch && keywordMatch;
   });
 
   const exportToJson = () => {
@@ -154,6 +156,19 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
             <option value="document">Документы</option>
             <option value="video">Видео</option>
           </select>
+
+          {/* Filter by Keywords */}
+          <button
+            type="button"
+            onClick={() => setOnlyKeywords(!onlyKeywords)}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+              onlyKeywords
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                : 'bg-neutral-950/80 text-neutral-400 border border-neutral-800 hover:text-neutral-200'
+            }`}
+          >
+            <span>🚨 Только с ключевыми словами</span>
+          </button>
         </div>
 
         {/* Action Buttons */}
@@ -244,11 +259,17 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
               second: '2-digit',
             });
 
+            const hasMatchedKeywords = msg.matchedKeywords && msg.matchedKeywords.length > 0;
+
             return (
               <div
                 key={msg.id}
                 id={`message-card-${msg.id}`}
-                className="bg-neutral-900/70 border border-neutral-800/90 hover:border-neutral-700 rounded-xl p-4 transition-all space-y-3"
+                className={`border rounded-xl p-4 transition-all space-y-3 ${
+                  hasMatchedKeywords
+                    ? 'bg-amber-950/20 border-amber-700/60 shadow-lg shadow-amber-950/20'
+                    : 'bg-neutral-900/70 border-neutral-800/90 hover:border-neutral-700'
+                }`}
               >
                 {/* Header of message */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800/60 pb-2.5">
@@ -266,6 +287,14 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
                       <span className="font-medium text-neutral-200">{senderDisplay}</span>
                       <span className="text-[10px] text-neutral-400 font-mono">({msg.sender.id})</span>
                     </div>
+
+                    {/* Matched Keywords Badge */}
+                    {hasMatchedKeywords && (
+                      <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-semibold">
+                        <span>🚨 Ключевые слова:</span>
+                        <span className="font-bold underline">{msg.matchedKeywords?.join(', ')}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -297,7 +326,11 @@ export const LiveMonitor: React.FC<LiveMonitorProps> = ({
                 </div>
 
                 {/* Body Content */}
-                <div className="text-xs text-neutral-100 font-sans leading-relaxed break-words bg-neutral-950/50 p-3 rounded-lg border border-neutral-900">
+                <div className={`text-xs text-neutral-100 font-sans leading-relaxed break-words p-3 rounded-lg border ${
+                  hasMatchedKeywords
+                    ? 'bg-neutral-950/90 border-amber-900/60'
+                    : 'bg-neutral-950/50 border-neutral-900'
+                }`}>
                   {msg.text ? (
                     <p className="whitespace-pre-wrap">{msg.text}</p>
                   ) : msg.caption ? (

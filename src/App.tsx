@@ -130,16 +130,28 @@ export default function App() {
   }, [autoRefresh, loadMessages, loadLogs]);
 
   // Save Bot Config
-  const handleSaveConfig = async (token: string, chatId: string) => {
+  const handleSaveConfig = async (
+    token: string,
+    chatId: string,
+    keywords?: string[],
+    forwardAll?: boolean,
+    notifyKeywords?: boolean
+  ) => {
     setIsLoading(true);
     try {
       const data = await safeFetchJson('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, chatId }),
+        body: JSON.stringify({
+          token,
+          chatId,
+          keywords,
+          forwardAll,
+          notifyKeywords,
+        }),
       });
       if (data.success) {
-        showToast('Настройки бота успешно сохранены!', 'success');
+        showToast('Настройки бота и ключевые слова успешно сохранены!', 'success');
         await refreshAll();
       } else {
         showToast(data.error || 'Ошибка сохранения настроек', 'error');

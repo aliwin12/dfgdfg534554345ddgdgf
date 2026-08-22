@@ -20,6 +20,11 @@ let botMode: 'webhook' | 'polling' | 'idle' = botToken ? 'webhook' : 'idle';
 let currentBot: Telegraf | null = null;
 let isPollingRunning = false;
 
+// Keywords and filter settings
+let watchedKeywords: string[] = ['срочно', 'важно', 'цена', 'заказ', 'купить', 'помощь', 'клиент'];
+let forwardAllMessages = true;
+let notifyOnKeyword = true;
+
 interface StoredMessage {
   id: string;
   telegramMessageId: number;
@@ -44,6 +49,7 @@ interface StoredMessage {
   status: 'success' | 'failed';
   error?: string;
   timestamp: string;
+  matchedKeywords?: string[];
 }
 
 interface StoredLog {
@@ -84,6 +90,22 @@ function detectMessageType(msg: any): 'text' | 'photo' | 'video' | 'document' | 
   return 'other';
 }
 
+// Keyword detection helper
+function detectMatchedKeywords(text: string, keywords: string[]): string[] {
+  if (!text || !keywords || keywords.length === 0) return [];
+  const lower = text.toLowerCase();
+  const matched: string[] = [];
+  for (const kw of keywords) {
+    const trimmed = kw.trim().toLowerCase();
+    if (!trimmed) continue;
+    // Check if substring or word match
+    if (lower.includes(trimmed)) {
+      matched.push(kw.trim());
+    }
+  }
+  return matched;
+}
+
 // Forwarding Logic
 async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
   try {
@@ -106,14 +128,44 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
       ? `@${from.username}`
       : `${from.first_name || ''} ${from.last_name || ''}`.trim() || `User ${from.id}`;
 
-    addLog('info', `Получено сообщение из «${title}» (${chat?.id}) от ${senderName}: ${text ? text.slice(0, 50) : `[${msgType}]`}`);
+    // Detect matched keywords
+    const matchedKeywords = detectMatchedKeywords(text, watchedKeywords);
+    const hasKeywordMatch = matchedKeywords.length > 0;
+
+    // Check if we should forward
+    // If forwardAllMessages is false, only forward when there's a keyword match
+    const shouldForward = forwardAllMessages || hasKeywordMatch;
+
+    addLog(
+      hasKeywordMatch ? 'warn' : 'info',
+      `${hasKeywordMatch ? '🚨 [КЛЮЧЕВОЕ СЛОВО: ' + matchedKeywords.join(', ') + ']' : 'Получено'} сообщение из «${title}» (${chat?.id}) от ${senderName}: ${text ? text.slice(0, 50) : `[${msgType}]`}`
+    );
 
     let forwardMethod: 'forwardMessage' | 'copyMessage' | 'simulated' = 'forwardMessage';
     let forwardStatus: 'success' | 'failed' = 'success';
     let errorMessage: string | undefined = undefined;
 
-    if (myChatId && currentBot) {
+    if (!shouldForward) {
+      addLog('info', `Сообщение пропущено: нет совпадений по ключевым словам (${watchedKeywords.join(', ')})`);
+      forwardStatus = 'success';
+      forwardMethod = 'simulated';
+    } else if (myChatId && currentBot) {
       try {
+        // If keyword match and notifyOnKeyword is on, send an explicit HIGH PRIORITY push notification first
+        if (hasKeywordMatch && notifyOnKeyword) {
+          const alertBadge = `🚨 <b>ВНИМАНИЕ: СРАБОТАЛО КЛЮЧЕВОЕ СЛОВО!</b>\n` +
+            `🔑 <b>Ключевые слова:</b> <code>${escapeHtml(matchedKeywords.join(', '))}</code>\n` +
+            `👥 <b>Чат:</b> ${escapeHtml(title)} (<code>${chat.id}</code>)\n` +
+            `👤 <b>Отправитель:</b> ${escapeHtml(senderName)} (<code>${from.id}</code>)\n\n` +
+            `💬 <i>${escapeHtml(text.slice(0, 300))}${text.length > 300 ? '...' : ''}</i>`;
+
+          await currentBot.telegram.sendMessage(myChatId, alertBadge, {
+            parse_mode: 'HTML',
+            disable_notification: false, // Ensure sound / push alert is triggered
+          });
+          addLog('success', `Отправлен срочный Push-алерт по ключевым словам: ${matchedKeywords.join(', ')}`);
+        }
+
         // Attempt standard forwardMessage (preserves original author tag)
         await currentBot.telegram.forwardMessage(myChatId, chat.id, msg.message_id);
         forwardMethod = 'forwardMessage';
@@ -122,7 +174,7 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
         addLog('warn', `forwardMessage не удался (${err.message}). Пробуем copyMessage с заголовком...`);
         try {
           // If forward fails (e.g. protected content, restricted group), use copyMessage
-          const header = `📩 <b>Источник:</b> ${escapeHtml(title)} (<code>${chat.id}</code>)\n👤 <b>Автор:</b> ${escapeHtml(senderName)} (<code>${from.id}</code>)`;
+          const header = `${hasKeywordMatch ? '🚨 <b>[КЛЮЧЕВОЕ СЛОВО: ' + escapeHtml(matchedKeywords.join(', ')) + ']</b>\n' : ''}📩 <b>Источник:</b> ${escapeHtml(title)} (<code>${chat.id}</code>)\n👤 <b>Автор:</b> ${escapeHtml(senderName)} (<code>${from.id}</code>)`;
           await currentBot.telegram.sendMessage(myChatId, header, { parse_mode: 'HTML' });
           await currentBot.telegram.copyMessage(myChatId, chat.id, msg.message_id);
           forwardMethod = 'copyMessage';
@@ -163,6 +215,7 @@ async function handleIncomingTelegramMessage(ctx: any, sourceTag = 'telegram') {
       status: forwardStatus,
       error: errorMessage,
       timestamp: new Date().toISOString(),
+      matchedKeywords: matchedKeywords.length > 0 ? matchedKeywords : undefined,
     };
 
     messagesHistory.unshift(recordedItem);
@@ -257,17 +310,20 @@ app.get('/api/config', (req, res) => {
     webhookUrl,
     serverUrl: detectedServerUrl,
     isConfigured: Boolean(botToken && myChatId),
+    keywords: watchedKeywords,
+    forwardAllMessages,
+    notifyOnKeyword,
   });
 });
 
 app.post('/api/config', (req, res) => {
-  const { token, chatId } = req.body;
+  const { token, chatId, keywords, forwardAll, notifyKeywords } = req.body;
 
   if (typeof chatId === 'string') {
     myChatId = chatId.trim();
   }
 
-  if (typeof token === 'string') {
+  if (typeof token === 'string' && token.trim()) {
     const trimmed = token.trim();
     if (trimmed !== botToken) {
       botToken = trimmed;
@@ -275,11 +331,31 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  addLog('info', `Настройки обновлены: Chat ID = ${myChatId || 'не задан'}, Bot Token = ${botToken ? 'задан' : 'пустой'}`);
+  if (Array.isArray(keywords)) {
+    watchedKeywords = keywords
+      .map((k) => (typeof k === 'string' ? k.trim() : ''))
+      .filter((k) => k.length > 0);
+  }
+
+  if (typeof forwardAll === 'boolean') {
+    forwardAllMessages = forwardAll;
+  }
+
+  if (typeof notifyKeywords === 'boolean') {
+    notifyOnKeyword = notifyKeywords;
+  }
+
+  addLog(
+    'info',
+    `Настройки обновлены: Chat ID = ${myChatId || 'не задан'}, Ключевых слов: ${watchedKeywords.length}, Пересылка всех: ${forwardAllMessages ? 'Да' : 'Только по ключевым словам'}`
+  );
 
   res.json({
     success: true,
     message: 'Настройки успешно сохранены',
+    keywords: watchedKeywords,
+    forwardAllMessages,
+    notifyOnKeyword,
   });
 });
 

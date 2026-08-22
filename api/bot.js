@@ -2,8 +2,18 @@ import { Telegraf } from 'telegraf';
 
 const token = process.env.BOT_TOKEN || '8988916261:AAF1b0yLepEVgdUPSike9NsENbWuTlHc4wc';
 const myChatId = process.env.MY_CHAT_ID;
+// List of keywords (can be configured via KEYWORDS environment variable as comma-separated values, or default list)
+const keywordsList = process.env.KEYWORDS
+  ? process.env.KEYWORDS.split(',').map((k) => k.trim().toLowerCase()).filter(Boolean)
+  : ['срочно', 'важно', 'цена', 'заказ', 'купить', 'помощь', 'клиент'];
 
 const bot = new Telegraf(token);
+
+function findKeywords(text) {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  return keywordsList.filter((kw) => lower.includes(kw));
+}
 
 bot.on(['message', 'channel_post'], async (ctx) => {
   try {
@@ -12,6 +22,7 @@ bot.on(['message', 'channel_post'], async (ctx) => {
 
     const chat = ctx.chat || msg.chat;
     const from = ctx.from || msg.from;
+    const text = msg.text || msg.caption || '';
 
     if (chat && myChatId && chat.id.toString() === myChatId.toString()) {
       return;
@@ -22,15 +33,33 @@ bot.on(['message', 'channel_post'], async (ctx) => {
       return;
     }
 
+    const title = chat.title || `${chat.first_name || ''} ${chat.last_name || ''}`.trim() || 'Чат';
+    const sender = from?.username 
+      ? `@${from.username}` 
+      : `${from?.first_name || ''} ${from?.last_name || ''}`.trim() || 'Пользователь';
+
+    // Keyword detection
+    const matched = findKeywords(text);
+    const hasKeyword = matched.length > 0;
+
+    if (hasKeyword) {
+      // Immediate push alert notification
+      const alertHeader = `🚨 <b>ВНИМАНИЕ: СРАБОТАЛО КЛЮЧЕВОЕ СЛОВО!</b>\n` +
+        `🔑 <b>Ключевые слова:</b> <code>${matched.join(', ')}</code>\n` +
+        `👥 <b>Чат:</b> ${title} (<code>${chat.id}</code>)\n` +
+        `👤 <b>Автор:</b> ${sender} (<code>${from?.id || 'N/A'}</code>)\n\n` +
+        `💬 <i>${text.slice(0, 300)}</i>`;
+
+      await ctx.telegram.sendMessage(myChatId, alertHeader, {
+        parse_mode: 'HTML',
+        disable_notification: false,
+      });
+    }
+
     try {
       await ctx.telegram.forwardMessage(myChatId, chat.id, msg.message_id);
     } catch (forwardErr) {
-      const title = chat.title || 'Чат';
-      const sender = from?.username 
-        ? `@${from.username}` 
-        : `${from?.first_name || ''} ${from?.last_name || ''}`.trim() || 'Пользователь';
-
-      const infoHeader = `📩 <b>Источник:</b> ${title} (<code>${chat.id}</code>)\n👤 <b>Автор:</b> ${sender} (<code>${from?.id || 'N/A'}</code>)`;
+      const infoHeader = `${hasKeyword ? '🚨 <b>[КЛЮЧЕВОЕ СЛОВО: ' + matched.join(', ') + ']</b>\n' : ''}📩 <b>Источник:</b> ${title} (<code>${chat.id}</code>)\n👤 <b>Автор:</b> ${sender} (<code>${from?.id || 'N/A'}</code>)`;
       await ctx.telegram.sendMessage(myChatId, infoHeader, { parse_mode: 'HTML' });
       await ctx.telegram.copyMessage(myChatId, chat.id, msg.message_id);
     }

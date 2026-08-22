@@ -7,6 +7,9 @@ export interface BotConfig {
   webhookUrl: string;
   serverUrl: string;
   isConfigured: boolean;
+  keywords?: string[];
+  forwardAllMessages?: boolean;
+  notifyOnKeyword?: boolean;
 }
 
 export interface ForwardedMessage {
@@ -33,6 +36,7 @@ export interface ForwardedMessage {
   status: 'success' | 'failed';
   error?: string;
   timestamp: string;
+  matchedKeywords?: string[];
 }
 
 export interface BotInfo {
